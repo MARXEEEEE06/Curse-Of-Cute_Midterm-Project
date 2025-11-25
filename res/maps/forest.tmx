@@ -24,7 +24,7 @@
  <objectgroup id="20" name="collisions">
   <object id="124" name="trees" type="collision" x="750.667" y="471.333" width="532" height="14"/>
   <object id="178" name="trees" type="collision" x="1279.66" y="476.999" width="324.667" height="27.3333" rotation="90"/>
-  <object id="179" name="trees" type="collision" x="798.334" y="1282.67" width="278" height="27.3333" rotation="180"/>
+  <object id="179" name="trees" type="collision" x="796.584" y="1256.67" width="278" height="27.3333" rotation="180"/>
   <object id="127" name="trees" type="collision" x="751.636" y="408.545" width="9.81818" height="62.5455"/>
   <object id="128" name="trees" type="collision" x="761.455" y="401.94" width="115.636" height="9.96969"/>
   <object id="129" name="trees" type="collision" x="874.091" y="164.182" width="11.5455" height="239.636"/>
