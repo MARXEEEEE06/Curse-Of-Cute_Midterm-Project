@@ -1,517 +1,631 @@
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.io.IOException;
 import javax.imageio.ImageIO;
+import javax.swing.*;
 
 /**
- * Pokémon-style combat screen with skill animations.
- * - Auto-starts and displays skill animations when combat begins
- * - Loads frames from res/Entities/Combat recursively
- * - Groups images by actor and skill number
- * - Turn-based combat with 3 skills and Run button
+ * Simple Pokémon-like battle demo in Java Swing.
+ * - Uses your uploaded assets located under /mnt/data/*.png
+ * - Animates idle frames for player (Felis) and enemy (Browney)
+ * - Simple turn: Player "Attack" -> Enemy takes damage -> Enemy retaliates
+ *
+ * To compile and run:
+ *   javac Combat.java
+ *   java Combat
+ *
+ * Make sure the image files exist at the exact paths used below.
  */
-public class Combat {
-    private final GamePanel gp;
-    private boolean active = false;
+public class Combat extends JPanel implements ActionListener {
+    // Asset paths (these point to the uploaded files in the container)
+    private static final String BG_FOLDER = 
+    "res/Entities/Combat/background for battle/";
 
-    private int playerHP, playerMaxHP;
-    private int enemyHP, enemyMaxHP;
+    private static final String[] BG_PATHS = {
+        BG_FOLDER + "BACKGROUND1.png",
+        BG_FOLDER + "BACKGROUND2.png",
+        BG_FOLDER + "BACKGROUND3.png",
+        BG_FOLDER + "BACKGROUND4.png",
+        BG_FOLDER + "BACKGROUND5.png",
+        BG_FOLDER + "BACKGROUND6.png",
+        BG_FOLDER + "BACKGROUND7.png",
+        BG_FOLDER + "BACKGROUND8.png"
+    };
 
-    // actor -> skillId -> frames
-    private final Map<String, Map<Integer, List<BufferedImage>>> frames = new HashMap<>();
+    private static final String FELIS_FOLDER = 
+    "res/Entities/felis idle/";
 
-    // Current animation
-    private List<BufferedImage> currentFrames = null;
-    private int currentFrameIndex = 0;
-    private int animationFrameDelay = 0;
-    private final int animationFrameSpeed = 10; // higher = slower animation
-    private boolean isAnimating = false;
-    private BufferedImage enemyImage = null;
+    private static final String[] FELIS_FRAMES = {
+        FELIS_FOLDER + "Felis_idle1.png",
+        FELIS_FOLDER + "Felis_idle2.png",
+        FELIS_FOLDER + "Felis_idle3.png",
+        FELIS_FOLDER + "Felis_idle4.png"
+    };
 
-    public Combat(GamePanel gp) {
-        this.gp = gp;
-        // Default HP values
-        this.playerMaxHP = 100;
-        this.enemyMaxHP = 80;
-        this.playerHP = playerMaxHP;
-        this.enemyHP = enemyMaxHP;
-        
-        // Load combat frames and enemy image
-        loadFrames(new File("res/Entities/Combat"));
-        loadEnemyImage(new File("res/Entities/Combat/enemy"));
-    }
 
-    private void loadFrames(File root) {
-        if (root == null || !root.exists()) return;
-        File[] files = root.listFiles();
-        if (files == null) return;
-        
-        for (File f : files) {
-            if (f.isDirectory()) {
-                // Check if this folder is a skill folder (e.g., skill1, skill2, etc.)
-                String folderName = f.getName().toLowerCase();
-                int skillNumFromFolder = -1;
-                Matcher m = Pattern.compile("skill\\D*(\\d+)", Pattern.CASE_INSENSITIVE).matcher(folderName);
-                if (m.find()) {
-                    try { 
-                        skillNumFromFolder = Integer.parseInt(m.group(1)); 
-                    } catch (NumberFormatException ex) { 
-                        skillNumFromFolder = -1; 
-                    }
-                }
-                
-                loadFramesFromFolder(f, skillNumFromFolder);
-                continue;
-            }
-            
-            String name = f.getName();
-            String lower = name.toLowerCase();
-            if (!(lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) continue;
-            
-            try {
-                BufferedImage img = ImageIO.read(f);
-                if (img == null) continue;
+    private static final String BROWNEY_FOLDER = 
+    "res/Entities/Combat/brown idle/";
 
-                // Determine skill number by searching for "skill <num>" in filename
-                int skillNum = 1;
-                Matcher m2 = Pattern.compile("skill\\D*(\\d+)", Pattern.CASE_INSENSITIVE).matcher(name);
-                if (m2.find()) {
-                    try { 
-                        skillNum = Integer.parseInt(m2.group(1)); 
-                    } catch (NumberFormatException ex) { 
-                        skillNum = 1; 
-                    }
-                } else {
-                    // Fallback to trailing digit before extension
-                    Matcher t = Pattern.compile("(\\d+)\\.[a-zA-Z]{1,4}$").matcher(name);
-                    if (t.find()) {
-                        try { 
-                            skillNum = Integer.parseInt(t.group(1)); 
-                        } catch (NumberFormatException ex) { 
-                            skillNum = 1; 
-                        }
-                    }
-                }
+    private static final String[] BROWNEY_FRAMES = {
+        BROWNEY_FOLDER + "Browney_idle1.png",
+        BROWNEY_FOLDER + "Browney_idle2.png",
+        BROWNEY_FOLDER + "Browney_idle3.png",
+        BROWNEY_FOLDER + "Browney_idle4.png"
+    };
 
-                // Actor key: take filename before the SKILL token
-                String actorKeyRaw = name;
-                int splitPos = name.toLowerCase().indexOf("skill");
-                if (splitPos > 0) actorKeyRaw = name.substring(0, splitPos).trim();
-                actorKeyRaw = actorKeyRaw.replaceAll("\\.[a-zA-Z]{1,4}$", "").trim();
-                String actorKey = actorKeyRaw.replaceAll("[^A-Za-z0-9 ]", "").trim();
-                if (actorKey.isEmpty()) actorKey = "OTHER";
-
-                frames.putIfAbsent(actorKey, new HashMap<>());
-                Map<Integer, List<BufferedImage>> mmap = frames.get(actorKey);
-                mmap.putIfAbsent(skillNum, new ArrayList<>());
-                mmap.get(skillNum).add(img);
-                
-                System.out.println("CombatLoader: " + name + " -> Actor='" + sanitize(actorKey) + 
-                    "' Skill=" + skillNum + " (w=" + img.getWidth() + ",h=" + img.getHeight() + ")");
-            } catch (Exception ex) {
-                System.out.println("CombatLoader: failed to load " + f.getAbsolutePath() + " -> " + ex.getMessage());
-            }
-        }
-        
-        // Print summary
-        int total = 0;
-        for (Map.Entry<String, Map<Integer, List<BufferedImage>>> a : frames.entrySet()) {
-            for (Map.Entry<Integer, List<BufferedImage>> e : a.getValue().entrySet()) {
-                total += e.getValue().size();
-            }
-            System.out.println("CombatLoader: actor='" + sanitize(a.getKey()) + "' skills=" + a.getValue().keySet());
-        }
-        System.out.println("CombatLoader: total frames=" + total);
-    }
-
-    private void loadFramesFromFolder(File folder, int skillNumFromFolder) {
-        File[] files = folder.listFiles();
-        if (files == null) return;
-        
-        for (File f : files) {
-            if (f.isDirectory()) {
-                loadFramesFromFolder(f, skillNumFromFolder);
-                continue;
-            }
-            
-            String name = f.getName();
-            String lower = name.toLowerCase();
-            if (!(lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) continue;
-            
-            try {
-                BufferedImage img = ImageIO.read(f);
-                if (img == null) continue;
-
-                // Use skill number from parent folder if available
-                int skillNum = skillNumFromFolder > 0 ? skillNumFromFolder : 1;
-                if (skillNumFromFolder <= 0) {
-                    Matcher t = Pattern.compile("(\\d+)\\.[a-zA-Z]{1,4}$").matcher(name);
-                    if (t.find()) {
-                        try { 
-                            skillNum = Integer.parseInt(t.group(1)); 
-                        } catch (NumberFormatException ex) { 
-                            skillNum = 1; 
-                        }
-                    }
-                }
-
-                // Actor key: take filename before any numeric suffixes
-                String actorKeyRaw = name.replaceAll("\\s*\\d+\\.[a-zA-Z]{1,4}$", "").trim();
-                String actorKey = actorKeyRaw.replaceAll("[^A-Za-z0-9 ]", "").trim();
-                if (actorKey.isEmpty()) actorKey = "OTHER";
-
-                frames.putIfAbsent(actorKey, new HashMap<>());
-                Map<Integer, List<BufferedImage>> mmap = frames.get(actorKey);
-                mmap.putIfAbsent(skillNum, new ArrayList<>());
-                mmap.get(skillNum).add(img);
-                
-                System.out.println("CombatLoader: " + name + " -> Actor='" + sanitize(actorKey) + 
-                    "' Skill=" + skillNum + " (w=" + img.getWidth() + ",h=" + img.getHeight() + ")");
-            } catch (Exception ex) {
-                System.out.println("CombatLoader: failed to load " + f.getAbsolutePath() + " -> " + ex.getMessage());
-            }
-        }
-    }
-
-    private void loadEnemyImage(File folder) {
-        if (folder == null || !folder.exists() || !folder.isDirectory()) {
-            System.out.println("CombatLoader: enemy folder not found at " + 
-                (folder == null ? "null" : folder.getAbsolutePath()));
-            return;
-        }
-        
-        File[] files = folder.listFiles((d, name) -> {
-            String lower = name.toLowerCase();
-            return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
-        });
-        
-        if (files == null || files.length == 0) {
-            System.out.println("CombatLoader: no enemy images found in " + folder.getAbsolutePath());
-            return;
-        }
-        
-        try {
-            BufferedImage img = ImageIO.read(files[0]);
-            if (img != null) {
-                enemyImage = img;
-                System.out.println("CombatLoader: loaded enemy image '" + files[0].getName() + 
-                    "' (" + img.getWidth() + "x" + img.getHeight() + ")");
-            }
-        } catch (Exception ex) {
-            System.out.println("CombatLoader: failed to load enemy image -> " + ex.getMessage());
-        }
-    }
-
-    private String sanitize(String s) {
-        if (s == null) return "";
-        String low = s.toLowerCase();
-        if (low.contains("nigg")) return "[redacted]";
-        return s;
-    }
-
-    public boolean isActive() { 
-        return active; 
-    }
-
-    public void startCombat() {
-        if (active) return;
-        active = true;
-        playerHP = playerMaxHP;
-        enemyHP = enemyMaxHP;
-        gp.repaint();
-    }
-
-    private void autoPlayPreferredSkill() {
-        // Prefer an actor that contains 'BS'
-        String chosenActor = null;
-        for (String a : frames.keySet()) {
-            if (a.toUpperCase().contains("BS")) { 
-                chosenActor = a; 
-                break; 
-            }
-        }
-        if (chosenActor == null && !frames.isEmpty()) {
-            chosenActor = frames.keySet().iterator().next();
-        }
-
-        if (chosenActor == null) return;
-        Map<Integer, List<BufferedImage>> skills = frames.get(chosenActor);
-        if (skills == null || skills.isEmpty()) return;
-
-        // Prefer skill 2, then skill 1, else smallest available skill id
-        List<BufferedImage> f = skills.get(2);
-        int playedSkill = 2;
-        if (f == null) {
-            f = skills.get(1);
-            playedSkill = 1;
-        }
-        if (f == null) {
-            Integer min = skills.keySet().stream().min(Integer::compareTo).orElse(null);
-            if (min != null) {
-                f = skills.get(min);
-                playedSkill = min;
-            }
-        }
-        if (f == null || f.isEmpty()) return;
-
-        currentFrames = f;
-        currentFrameIndex = 0;
-        System.out.println("Combat: auto-playing skill " + playedSkill + 
-            " for actor='" + sanitize(chosenActor) + "' frames=" + f.size());
-    }
-
-    public void endCombat() {
-        active = false;
-        currentFrames = null;
-        currentFrameIndex = 0;
-        animationFrameDelay = 0;
-        isAnimating = false;
-        gp.repaint();
-    }
-
-    public boolean onMouseClicked(int mx, int my) {
-        if (!active) return false;
-        
-        int menuY = gp.gamePanelSizeY - 130;
-        int btnW = 140;
-        int btnH = 40;
-        int spacing = 20;
-        int startX = (gp.gamePanelSizeX - (btnW * 2 + spacing)) / 2;
-        int startY = menuY + 20;
-
-        // Skill 1 (top-left)
-        if (isClickInRect(mx, my, startX, startY, btnW, btnH)) {
-            playerUseSkill(1);
-            return true;
-        }
-        // Skill 2 (top-right)
-        if (isClickInRect(mx, my, startX + btnW + spacing, startY, btnW, btnH)) {
-            playerUseSkill(2);
-            return true;
-        }
-        // Skill 3 (bottom-left)
-        if (isClickInRect(mx, my, startX, startY + btnH + spacing, btnW, btnH)) {
-            playerUseSkill(3);
-            return true;
-        }
-        // Run (bottom-right)
-        if (isClickInRect(mx, my, startX + btnW + spacing, startY + btnH + spacing, btnW, btnH)) {
-            endCombat();
-            return true;
-        }
-        
-        return false;
-    }
+    private BufferedImage background;
+    private BufferedImage[] felisFrames;
+    private BufferedImage[] browneyFrames;
     
-    private boolean isClickInRect(int x, int y, int rx, int ry, int rw, int rh) {
-        return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
-    }
+    // Skill 1 animation
+    private BufferedImage[] skill1Frames; // array holding all frames of Skill 1
+    private int skill1Index = 0;          // current frame
+    private boolean skill1Active = false; // whether animation is playing
+    private Timer skill1Timer;    
+    private BufferedImage[] skill2Frames; // array holding all frames of Skill 1
+    private int skill2Index = 0;          // current frame
+    private boolean skill2Active = false; // whether animation is playing
+    private Timer skill2Timer;         // cycles through frames
+    private BufferedImage[] skill3Frames; // array holding all frames of Skill 1
+    private int skill3Index = 0;          // current frame
+    private boolean skill3Active = false; // whether animation is playing
+    private Timer skill3Timer; 
 
-    private void playerUseSkill(int id) {
-        if (!active) return;
+    // Browney Skill 1
+    private BufferedImage[] browneySkill1Frames;
+    private int browneySkill1Index = 0;
+    private boolean browneySkill1Active = false;
+    private Timer browneySkill1Timer;
+
+
+    private int felisIndex = 0;
+    private int browneyIndex = 0;
+    private int whatFrame = 0;
+
+    // Simple stats
+    private int playerHp = 100;
+    private int enemyHp = 100;
+    private boolean enemyDefeated = false;
+
+
+    // UI
+    private Timer animationTimer;
+    private Timer enemyActionTimer;
+    private JButton skill1Btn;
+    private JButton skill2Btn;
+    private JButton skill3Btn;
+    private JLabel statusLabel;
+    private JComboBox<String> bgSelect;
+    
+    // GamePanel reference for integration
+    private GamePanel gamePanel;
+    private boolean combatActive = false;
+
+    public Combat(GamePanel gamePanel) {
+        this.gamePanel = gamePanel;
+        setPreferredSize(new Dimension(800, 600));
+        setLayout(null);
+
+        loadAssets(0); // load default background
+
+        // Animation timer (sprite frame updates)
+        animationTimer = new Timer(150, e -> {
+            felisIndex = (felisIndex + 1) % felisFrames.length;
+            browneyIndex = (browneyIndex + 1) % browneyFrames.length;
+            repaint();
+        });
+        // Don't start animation timer here - only start when combat begins
+        // animationTimer.start();
+
+        int panelWidth = 800;
+        int btnWidth = 100;
+        int btnHeight = 30;
+        int rightMargin = 60;  // distance from right edge
+        int startY = 500;
+
         
-        // Update animation
-        onSkillPressed(id);
-        
-        // Calculate damage
-        int dmg = switch(id) {
-            case 1 -> 18;
-            case 2 -> 12;
-            case 3 -> 8;
-            default -> 10;
-        };
-        
-        enemyHP -= dmg;
-        if (enemyHP <= 0) { 
-            enemyHP = 0; 
-            gp.repaint(); 
-            endCombat(); 
-            return; 
+
+        // Skill buttons
+        skill1Btn = new JButton("Skill 1");
+        skill1Btn.setBounds(panelWidth - btnWidth - rightMargin - 280, startY, btnWidth, btnHeight);
+        skill1Btn.setBackground(new Color(0, 0, 70));
+        skill1Btn.setForeground(Color.YELLOW);
+        skill1Btn.setFont(new Font("Bradley Hand ITC", Font.BOLD, 18));
+        skill1Btn.setFocusPainted(false);
+        skill1Btn.setVisible(false);
+        skill1Btn.addActionListener(e -> {
+        if (!skill1Active) {
+            skill1Active = true;   // mark animation as playing
+            skill1Index = 0;       // start from first frame
+            if (skill1Timer != null) skill1Timer.start();   // start cycling frames
+            playerSkill(1, 15, 5); // call damage logic
         }
-        gp.repaint();
-        
-        // Enemy retaliates
-        enemyAttack();
-    }
+        });
+        add(skill1Btn);
 
-    private void enemyAttack() {
-        int dmg = 10 + (int)(Math.random() * 8);
-        playerHP -= dmg;
-        if (playerHP <= 0) { 
-            playerHP = 0; 
-            gp.repaint(); 
-            endCombat(); 
-            return; 
+        skill2Btn = new JButton("Skill 2");
+        skill2Btn.setBounds(panelWidth - btnWidth - rightMargin - 150, startY, btnWidth, btnHeight);
+        skill2Btn.setBackground(new Color(0, 0, 70));
+        skill2Btn.setForeground(Color.YELLOW);
+        skill2Btn.setFont(new Font("Bradley Hand ITC", Font.BOLD, 18));
+        skill2Btn.setFocusPainted(false);
+        skill2Btn.setVisible(false);
+        skill2Btn.addActionListener(e -> {
+        if (!skill2Active) {
+            skill2Active = true;   // mark animation as playing
+            skill2Index = 0;       // start from first frame
+            if (skill2Timer != null) skill2Timer.start();   // start cycling frames
+            playerSkill(2, 8, 5); // call damage logic
         }
-        gp.repaint();
+        });
+        add(skill2Btn);
+
+
+        skill3Btn = new JButton("Skill 3");
+        skill3Btn.setBounds(panelWidth - btnWidth - rightMargin - 20, startY, btnWidth, btnHeight);
+        skill3Btn.setBackground(new Color(0, 0, 70));
+        skill3Btn.setForeground(Color.YELLOW);
+        skill3Btn.setFont(new Font("Bradley Hand ITC", Font.BOLD, 18));
+        skill3Btn.setFocusPainted(false);
+        skill3Btn.setVisible(false);
+        skill3Btn.addActionListener(e -> {
+        if (!skill3Active) {
+            skill3Active = true;   // mark animation as playing
+            skill3Index = 0;       // start from first frame
+            if (skill3Timer != null) skill3Timer.start();   // start cycling frames
+            playerSkill(3, 22, 5); // call damage logic
+        }
+        });
+        add(skill3Btn);
+
+        // Status label
+        statusLabel = new JLabel("Choose your action...");
+        statusLabel.setForeground(Color.YELLOW);
+        statusLabel.setFont(new Font("Bradley Hand ITC", Font.BOLD, 16));
+        statusLabel.setVisible(false);
+        add(statusLabel);
+
+        // Background selector
+        bgSelect = new JComboBox<>();
+        for (int i = 0; i < BG_PATHS.length; i++) bgSelect.addItem("BACKGROUND" + (i+1));
+        bgSelect.setBounds(20, 20, 140, 30);
+        bgSelect.addActionListener(e -> loadAssets(bgSelect.getSelectedIndex()));
+        bgSelect.setVisible(false);
+        add(bgSelect);
+
+        // Enemy action timer placeholder
+        enemyActionTimer = new Timer(800, null);
     }
 
-    public void onSkillPressed(int id) {
-        if (!active || isAnimating) return;
-        // Find any actor that has this skill
-        for (Map<Integer, List<BufferedImage>> skills : frames.values()) {
-            List<BufferedImage> f = skills.get(id);
-            if (f != null && !f.isEmpty()) {
-                currentFrames = f;
-                currentFrameIndex = 0;
-                animationFrameDelay = 0;
-                isAnimating = true;
-                gp.repaint();
-                return;
+    // Unified skill method
+    private void playerSkill(int skillNum, int baseDamage, int randomRange) {
+        if (enemyHp <= 0 || playerHp <= 0) return;
+
+        int dmg = baseDamage + (int)(Math.random() * randomRange);
+        enemyHp = Math.max(0, enemyHp - dmg);
+        statusLabel.setText("Skill " + skillNum + " hits the enemy for " + dmg + " damage!");
+        repaint();
+
+        if (enemyHp == 0) {
+        enemyHp = 0;
+        enemyDefeated = true;          // mark enemy defeated
+        statusLabel.setText("Enemy defeated!");
+        skill1Btn.setEnabled(false);   // disable skill buttons
+        skill2Btn.setEnabled(false);
+        skill3Btn.setEnabled(false);
+        repaint();
+        return;
+    }
+        // Disable skill buttons during enemy attack
+        skill1Btn.setEnabled(false);
+        skill2Btn.setEnabled(false);
+        skill3Btn.setEnabled(false);
+
+        // Enemy retaliation
+        enemyActionTimer.stop();
+        enemyActionTimer = new Timer(700, ae -> {
+            enemyAttack();
+            skill1Btn.setEnabled(true);
+            skill2Btn.setEnabled(true);
+            skill3Btn.setEnabled(true);
+        });
+        enemyActionTimer.setRepeats(false);
+        enemyActionTimer.start();
+    }
+
+    public void enemyAttack() {
+
+    // Trigger Browney skill animation
+    browneySkill1Active = true;
+    browneySkill1Index = 0;
+    if (browneySkill1Timer != null) browneySkill1Timer.start();
+
+    int preDamage = 5;
+    int randomNum = 5;
+
+    // Now apply enemy damage normally
+    int damage = preDamage + (int)(Math.random() * randomNum); // whatever your attack is
+    playerHp -= damage;
+    if (playerHp < 0) playerHp = 0;
+
+    statusLabel.setText("Browney used Skill 1! -" + damage + " HP");
+
+}
+
+
+    private void loadAssets(int bgIndex) {
+        try {
+            background = ImageIO.read(new File(BG_PATHS[bgIndex]));
+        } catch (IOException ex) {
+            background = new BufferedImage(800, 600, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = background.createGraphics();
+            g.setColor(new Color(100, 200, 255));
+            g.fillRect(0, 0, 800, 600);
+            g.setColor(new Color(100, 200, 100));
+            g.fillRect(0, 300, 800, 300);
+            g.dispose();
+        }
+
+        skill1Frames = new BufferedImage[8]; // 8 PNGs for skill 1
+        for (int i = 0; i < 8; i++) {
+            try {
+                String path = "res/Entities/Combat/felis skill 1/S1A" + (i+1) + ".png";
+                skill1Frames[i] = ImageIO.read(new File(path));
+            } catch (IOException ex) {
+                ex.printStackTrace();
+                skill1Frames[i] = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB); // fallback
             }
         }
-    }
 
-    public void updateCursorOnHover(int mx, int my) {
-        if (!active) return;
-
-        int menuY = gp.gamePanelSizeY - 130;
-        int btnW = 140;
-        int btnH = 40;
-        int spacing = 20;
-        int startX = (gp.gamePanelSizeX - (btnW * 2 + spacing)) / 2;
-        int startY = menuY + 20;
-
-        // Check if mouse is over any button
-        boolean overButton = false;
-        // Skill 1
-        if (isClickInRect(mx, my, startX, startY, btnW, btnH)) overButton = true;
-        // Skill 2
-        else if (isClickInRect(mx, my, startX + btnW + spacing, startY, btnW, btnH)) overButton = true;
-        // Skill 3
-        else if (isClickInRect(mx, my, startX, startY + btnH + spacing, btnW, btnH)) overButton = true;
-        // Run
-        else if (isClickInRect(mx, my, startX + btnW + spacing, startY + btnH + spacing, btnW, btnH)) overButton = true;
-
-        if (overButton) {
-            gp.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        } else {
-            gp.setCursor(Cursor.getDefaultCursor());
-        }
-    }
-
-    public void update() {
-        if (!active || currentFrames == null || currentFrames.isEmpty()) return;
-
-        animationFrameDelay++;
-        if (animationFrameDelay >= animationFrameSpeed) {
-            currentFrameIndex = (currentFrameIndex + 1) % currentFrames.size();
-            if (currentFrameIndex == 0) {
-                isAnimating = false; // Stop animation after one full cycle
+        // Timer to cycle through frames
+        skill1Timer = new Timer(100, e -> { // 100ms per frame
+            skill1Index++;
+            if (skill1Index >= skill1Frames.length) {
+                skill1Index = 0;
+                skill1Active = false; // stop animation when last frame is reached
+                skill1Timer.stop();
+                enemyAttack();
             }
-            animationFrameDelay = 0;
-            gp.repaint();
+            repaint(); // redraw panel with updated frame
+        });
+
+        skill2Frames = new BufferedImage[8]; // 8 PNGs for skill 2
+        for (int i = 0; i < 8; i++) {
+            try {
+                String path = "res/Entities/Combat/felis skill 2/S2A" + (i+1) + ".png";
+                skill2Frames[i] = ImageIO.read(new File(path));
+            } catch (IOException ex) {
+                ex.printStackTrace();
+                skill2Frames[i] = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB); // fallback
+            }
+        }
+
+        // Timer to cycle through frames
+        skill2Timer = new Timer(100, e -> { // 100ms per frame
+            skill2Index++;
+            if (skill2Index >= skill2Frames.length) {
+                skill2Index = 0;
+                skill2Active = false; // stop animation when last frame is reached
+                skill2Timer.stop();
+                enemyAttack();
+            }
+            repaint(); // redraw panel with updated frame
+        });
+
+        skill3Frames = new BufferedImage[12]; // 8 PNGs for skill 2
+        for (int i = 0; i < 12; i++) {
+            try {
+                String path = "res/Entities/Combat/felis skill 3/S3A" + (i+1) + ".png";
+                skill3Frames[i] = ImageIO.read(new File(path));
+            } catch (IOException ex) {
+                ex.printStackTrace();
+                skill3Frames[i] = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB); // fallback
+            }
+        }
+
+        // Timer to cycle through frames
+        skill3Timer = new Timer(100, e -> { // 100ms per frame
+            skill3Index++;
+            if (skill3Index >= skill3Frames.length) {
+                skill3Index = 0;
+                skill3Active = false; // stop animation when last frame is reached
+                skill3Timer.stop();
+                enemyAttack();
+            }
+
+            repaint(); // redraw panel with updated frame
+        });
+
+        
+        // Load Browney Skill 1 (10 frames)
+        browneySkill1Frames = new BufferedImage[10]; // 8 PNGs for skill 2
+        for (int i = 0; i < 10; i++) {
+            try {
+                String path = "res/Entities/Combat/brown skill 1/Browney_skill" + (i+1) + ".png";
+                browneySkill1Frames[i] = ImageIO.read(new File(path));
+            } catch (IOException ex) {
+                ex.printStackTrace();
+                browneySkill1Frames[i] = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB); // fallback
+            }
+        }
+        browneySkill1Timer = new Timer(80, e -> {
+        browneySkill1Index++;
+
+        if (browneySkill1Index >= browneySkill1Frames.length) {
+            browneySkill1Timer.stop();
+            browneySkill1Active = false;
+            browneySkill1Index = 0;
+        }
+
+        repaint();
+        });
+
+
+        
+        // Load Felis frames
+        felisFrames = new BufferedImage[FELIS_FRAMES.length];
+        for (int i = 0; i < FELIS_FRAMES.length; i++) {
+            try {
+                felisFrames[i] = ImageIO.read(new File(FELIS_FRAMES[i]));
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+        }
+
+        // Load Browney frames
+        browneyFrames = new BufferedImage[BROWNEY_FRAMES.length];
+        for (int i = 0; i < BROWNEY_FRAMES.length; i++) {
+            try {
+                browneyFrames[i] = ImageIO.read(new File(BROWNEY_FRAMES[i]));
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+        }
+
+        repaint();
+        
+    }
+
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        // Combat rendering is now handled by the draw() method
+        // which is called from GamePanel.paintComponent()
+    }
+
+    private void drawHpBar(Graphics2D g, String name, int hp, int x, int y) {
+        g.setColor(Color.DARK_GRAY);
+        g.fillRect(x, y, 200, 20);
+        g.setColor(Color.GREEN);
+        int w = (int)(200 * (hp / 100.0));
+        g.fillRect(x, y, w, 20);
+        g.setColor(Color.BLACK);
+        g.drawRect(x, y, 200, 20);
+        g.drawString(name + " HP: " + hp + "/100", x - 8, y - 12);
+    }
+
+
+    @Override
+    public void actionPerformed(ActionEvent e) {
+        // not used
+    }
+
+    // ============ GAMEPANEL INTEGRATION METHODS ============
+    
+    /**
+     * Returns whether combat is currently active
+     */
+    public boolean isActive() {
+        return combatActive;
+    }
+
+    /**
+     * Starts combat and initializes the battle
+     */
+    public void startCombat() {
+        combatActive = true;
+        playerHp = 100;
+        enemyHp = 100;
+        enemyDefeated = false;
+        whatFrame = 0;
+        statusLabel.setText("Battle Started!");
+        statusLabel.setVisible(true);
+        skill1Btn.setVisible(true);
+        skill1Btn.setEnabled(true);
+        skill2Btn.setVisible(true);
+        skill2Btn.setEnabled(true);
+        skill3Btn.setVisible(true);
+        skill3Btn.setEnabled(true);
+        bgSelect.setVisible(true);
+        // Start animation timer when combat begins
+        if (animationTimer != null && !animationTimer.isRunning()) {
+            animationTimer.start();
+        }
+        repaint();
+    }
+
+    /**
+     * Ends combat and returns to gameplay
+     */
+    public void endCombat() {
+        combatActive = false;
+        statusLabel.setVisible(false);
+        skill1Btn.setVisible(false);
+        skill2Btn.setVisible(false);
+        skill3Btn.setVisible(false);
+        bgSelect.setVisible(false);
+        // Stop animation timer when combat ends
+        if (animationTimer != null && animationTimer.isRunning()) {
+            animationTimer.stop();
+        }
+        if (gamePanel != null) {
+            gamePanel.repaint();
         }
     }
 
+    /**
+     * Draw the combat UI on the provided Graphics context
+     */
     public void draw(Graphics g) {
-        if (!active) return;
         Graphics2D g2 = (Graphics2D) g;
 
-        // Battle background
-        g2.setColor(new Color(0, 0, 0, 0));
-        g2.fillRect(0, 0, gp.gamePanelSizeX, gp.gamePanelSizeY);
-
-        // Draw enemy
-        if (enemyImage != null) {
-            int ex = (gp.gamePanelSizeX - enemyImage.getWidth()) / 2;
-            int ey = 60;
-            g2.drawImage(enemyImage, ex, ey, null);
-        } else {
-            // Placeholder enemy
-            g2.setColor(Color.DARK_GRAY);
-            int ex = gp.gamePanelSizeX - 240;
-            int ey = 40;
-            g2.fillRect(ex, ey, 160, 140);
-            g2.setColor(Color.WHITE);
-            g2.drawString("Enemy", ex + 10, ey + 20);
+        // Draw background scaled to panel
+        if (background != null) {
+            g2.drawImage(background, 0, 0, 800, 600, null);
         }
 
-        // Enemy HP bar
-        drawHPBar(g2, gp.gamePanelSizeX - 260, 200, 220, 16, enemyHP, enemyMaxHP, Color.RED);
+        // Draw the block behind status text
+        g2.setColor(new Color(0, 0, 70, 200)); // semi-transparent dark blue
+        int labelX = 300;
+        int labelY = 400;
+        int labelWidth = 480;
+        int labelHeight = 80;
+        g2.fillRoundRect(labelX, labelY, labelWidth, labelHeight, 10, 10);
 
-        // Draw player skill animation
-        if (currentFrames != null && !currentFrames.isEmpty()) {
-            BufferedImage img = currentFrames.get(currentFrameIndex);
-            // Scale image to fit within game panel bounds
-            int maxWidth = gp.gamePanelSizeX / 4; // Max 1/4 of panel width
-            int maxHeight = gp.gamePanelSizeY / 3; // Max 1/3 of panel height
-            int scaledWidth = Math.min(img.getWidth(), maxWidth);
-            int scaledHeight = Math.min(img.getHeight(), maxHeight);
+        // Draw dynamic status text
+        g2.setColor(Color.YELLOW);
+        g2.setFont(new Font("Bradley Hand ITC", Font.BOLD, 24));
+        String text = statusLabel.getText();
+        g2.drawString(text, labelX + 10, labelY + 28);
 
-            int px = 40;
-            int py = gp.gamePanelSizeY - 240;
-            g2.drawImage(img, px, py, scaledWidth, scaledHeight, null);
-        } else {
-            // Placeholder player
-            int px = 40;
-            int py = gp.gamePanelSizeY - 240;
-            g2.setColor(Color.LIGHT_GRAY);
-            g2.fillRect(px, py, 120, 120);
-            g2.setColor(Color.WHITE);
-            g2.drawString("Your Felis", px + 8, py + 18);
+        // Draw brown oval platform
+        int platformWidth = 280;
+        int platformHeight = 70;
+        int platformX = 60;
+        int platformY = 480;
+        g2.setColor(new Color(135, 103, 51));
+        g2.fillOval(platformX, platformY, platformWidth, platformHeight);
+
+        // Draw player idle ONLY if no skill is active
+        if (!skill1Active && !skill2Active && !skill3Active) {
+            if (felisFrames != null && felisFrames.length > 0) {
+                BufferedImage pImg = felisFrames[felisIndex];
+                int pX = 20;
+                int pY = 600 - pImg.getHeight() - 20;
+                g2.drawImage(pImg, pX, pY, null);
+            }
         }
 
-        // Player HP bar
-        int px = 40;
-        int py = gp.gamePanelSizeY - 240;
-        drawHPBar(g2, px, py + 130, 220, 16, playerHP, playerMaxHP, Color.GREEN);
+        // Draw skill animations on top if active
+        if (skill1Active && skill1Frames != null) {
+            BufferedImage frame = skill1Frames[skill1Index];
+            g2.drawImage(frame, 0, 0, 800, 600, null);
+        } 
 
-        // Battle menu - only show if not animating
-        if (!isAnimating) {
-            int menuY = gp.gamePanelSizeY - 130;
-            g2.setColor(new Color(30, 30, 60, 240));
-            g2.fillRect(0, menuY, gp.gamePanelSizeX, 130);
-            g2.setColor(new Color(200, 180, 100));
-            g2.setStroke(new BasicStroke(3));
-            g2.drawRect(0, menuY, gp.gamePanelSizeX, 130);
-
-            int btnW = 140, btnH = 40, spacing = 20;
-            int startX = (gp.gamePanelSizeX - (btnW * 2 + spacing)) / 2;
-            int startY = menuY + 20;
-
-            drawMenuButton(g2, startX, startY, btnW, btnH, "Skill 1");
-            drawMenuButton(g2, startX + btnW + spacing, startY, btnW, btnH, "Skill 2");
-            drawMenuButton(g2, startX, startY + btnH + spacing, btnW, btnH, "Skill 3");
-            drawMenuButton(g2, startX + btnW + spacing, startY + btnH + spacing, btnW, btnH, "Run");
-
-            // Prompt
-            g2.setColor(Color.WHITE);
-            g2.setFont(new Font("Arial", Font.PLAIN, 12));
-            g2.drawString("What will you do?", 20, menuY + 115);
+        if (skill2Active && skill2Frames != null) {
+            BufferedImage frame = skill2Frames[skill2Index];
+            double scale1 = 0.28;
+            double scale2 = 0.40;
+            int w = (int)(800 * scale1);
+            int h = (int)(600 * scale2);
+            g2.drawImage(frame, 130, 300, w, h, null);
         }
+
+        if (skill3Active && skill3Frames != null) {
+            BufferedImage frame = skill3Frames[skill3Index];
+            g2.drawImage(frame, 0, 0, 800, 600, null);
+        }
+
+        if (browneySkill1Active && browneySkill1Frames != null) {
+            BufferedImage bf = browneySkill1Frames[browneySkill1Index];
+            g2.drawImage(bf, 0, 0, 800, 600, null);
+        }
+
+        // Draw basic HP bars
+        drawHpBar(g2, "Player", playerHp, 110, 570);
+        drawHpBar(g2, "Enemy", enemyHp, 490, 310);
+
+        // Draw enemy (Browney) in upper-right corner
+        if (!enemyDefeated && browneyFrames != null && browneyFrames.length > 0) {
+            BufferedImage eImg = browneyFrames[browneyIndex];
+            int eW = eImg.getWidth();
+            int eH = eImg.getHeight();
+            int eX = 800 - eW - 3;
+            int eY = 1;
+            g2.drawImage(eImg, eX, eY, null);
+        }
+
+        // Draw skill buttons
+        drawButton(g2, skill1Btn);
+        drawButton(g2, skill2Btn);
+        drawButton(g2, skill3Btn);
     }
 
-    private void drawMenuButton(Graphics2D g2, int x, int y, int w, int h, String label) {
-        g2.setColor(new Color(70, 60, 100));
-        g2.fillRect(x, y, w, h);
-        g2.setColor(new Color(200, 180, 100));
+    /**
+     * Draw a button on the graphics context
+     */
+    private void drawButton(Graphics2D g2, JButton btn) {
+        Rectangle bounds = btn.getBounds();
+        
+        // Draw button background
+        g2.setColor(btn.getBackground());
+        g2.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+        
+        // Draw button border
+        g2.setColor(Color.BLACK);
         g2.setStroke(new BasicStroke(2));
-        g2.drawRect(x, y, w, h);
-        g2.setColor(Color.WHITE);
-        g2.setFont(new Font("Arial", Font.BOLD, 14));
-        int textW = g2.getFontMetrics().stringWidth(label);
-        int textH = g2.getFontMetrics().getAscent();
-        g2.drawString(label, x + (w - textW) / 2, y + (h + textH) / 2 - 2);
+        g2.drawRect(bounds.x, bounds.y, bounds.width, bounds.height);
+        
+        // Draw button text
+        g2.setColor(btn.getForeground());
+        g2.setFont(btn.getFont());
+        FontMetrics fm = g2.getFontMetrics();
+        String text = btn.getText();
+        int textX = bounds.x + (bounds.width - fm.stringWidth(text)) / 2;
+        int textY = bounds.y + ((bounds.height - fm.getHeight()) / 2) + fm.getAscent();
+        g2.drawString(text, textX, textY);
     }
 
-    private void drawHPBar(Graphics2D g2, int x, int y, int w, int h, int val, int max, Color fill) {
-        g2.setColor(Color.DARK_GRAY);
-        g2.fillRect(x, y, w, h);
-        double pct = Math.max(0, Math.min(1.0, (double)val / Math.max(1, max)));
-        int fw = (int)(w * pct);
-        g2.setColor(fill);
-        g2.fillRect(x, y, fw, h);
-        g2.setColor(Color.WHITE);
-        g2.drawRect(x, y, w, h);
-        g2.setFont(new Font("Arial", Font.PLAIN, 12));
-        String t = val + "/" + max;
-        g2.drawString(t, x + w + 6, y + h - 2);
+    /**
+     * Handle mouse clicks in the combat UI
+     */
+    public void onMouseClicked(int x, int y) {
+        // Check if any buttons were clicked
+        if (skill1Btn.getBounds().contains(x, y)) {
+            skill1Btn.doClick();
+        } else if (skill2Btn.getBounds().contains(x, y)) {
+            skill2Btn.doClick();
+        } else if (skill3Btn.getBounds().contains(x, y)) {
+            skill3Btn.doClick();
+        }
+    }
+
+    /**
+     * Update cursor based on hover state
+     */
+    public void updateCursorOnHover(int x, int y) {
+        // Change cursor to hand if hovering over a button
+        if (skill1Btn.getBounds().contains(x, y) ||
+            skill2Btn.getBounds().contains(x, y) ||
+            skill3Btn.getBounds().contains(x, y)) {
+            setCursor(new Cursor(Cursor.HAND_CURSOR));
+        } else {
+            setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
+        }
+    }
+
+    /**
+     * Handle skill button press from keyboard (1, 2, 3)
+     */
+    public void onSkillPressed(int skillNumber) {
+        if (!combatActive) return;
+        
+        switch (skillNumber) {
+            case 1:
+                skill1Btn.doClick();
+                break;
+            case 2:
+                skill2Btn.doClick();
+                break;
+            case 3:
+                skill3Btn.doClick();
+                break;
+            default:
+                break;
+        }
     }
 }

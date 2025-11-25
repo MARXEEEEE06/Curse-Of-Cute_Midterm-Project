@@ -45,12 +45,22 @@ public class GamePanel extends JPanel {
 
     public void entitiesCollision() {
         playerCollision = new Collisions(playerX, playerY, tileSize/2, tileSize/2);
-        if (null != playerDirection) switch (playerDirection) {
-            case "up" -> playerCollision = new Collisions(playerX+23, playerY-(((tileSize/2)-20)), tileSize/2, tileSize/2);
-            case "down" -> playerCollision = new Collisions(playerX+23, playerY+tileSize+15, tileSize/2, tileSize/2);
-            case "left" -> playerCollision = new Collisions((playerX+15), playerY+23, tileSize/2, tileSize/2);
-            case "right" -> playerCollision = new Collisions(playerX+tileSize+3, playerY+23, tileSize/2, tileSize/2);
-            default -> {
+        if (playerDirection != null) {
+            switch (playerDirection) {
+                case "up":
+                    playerCollision = new Collisions(playerX + 23, playerY - (((tileSize / 2) - 20)), tileSize / 2, tileSize / 2);
+                    break;
+                case "down":
+                    playerCollision = new Collisions(playerX + 23, playerY + tileSize + 15, tileSize / 2, tileSize / 2);
+                    break;
+                case "left":
+                    playerCollision = new Collisions((playerX + 15), playerY + 23, tileSize / 2, tileSize / 2);
+                    break;
+                case "right":
+                    playerCollision = new Collisions(playerX + tileSize + 3, playerY + 23, tileSize / 2, tileSize / 2);
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -169,7 +179,7 @@ public class GamePanel extends JPanel {
                 entities.updateCursorOnHover(e.getX(), e.getY());
             }
         });
-    };
+    }
 
     // character movement
     public void moveUp() {

@@ -20,11 +20,6 @@ public class KeyHandler implements KeyListener {
     }
 
     public void update() {
-        // Update combat animations if active
-        if (gp.combat != null) {
-            gp.combat.update();
-        }
-
         if (upIsPressed)
             gp.moveUp();
         else if (downIsPressed)
@@ -33,19 +28,14 @@ public class KeyHandler implements KeyListener {
             gp.moveLeft();
         else if (rightIsPressed)
             gp.moveRight();
-        else if (!upIsPressed && !downIsPressed && !leftIsPressed && !rightIsPressed)
-            // player.idle();
 
-            gp.repaint();
+        gp.repaint();
     }
 
     @Override
     public void keyPressed(KeyEvent e) {
         int code = e.getKeyCode();
-        System.out.println("MapX: " + gp.mapX);
-        System.out.println("MapY: " + gp.mapY);
-        System.out.println("PlayerX: " + gp.playerX);
-        System.out.println("PlayerY: " + gp.playerY);
+        // Debug logging removed to avoid console spam. Use explicit logging while debugging if needed.
 
         // If 'M' pressed while in game, open main menu
         if (code == KeyEvent.VK_M) {
